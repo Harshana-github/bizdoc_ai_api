@@ -29,7 +29,10 @@ class AuthService
             return null;
         }
 
+        $user = auth('api')->user();
+
         return [
+            'user'  => $user,
             'token'       => $token,
             'token_type'  => 'bearer',
             'expires_in'  => auth('api')->factory()->getTTL() * 60,

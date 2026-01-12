@@ -9,29 +9,31 @@ use Illuminate\Support\Facades\Storage;
 
 class OcrController extends Controller
 {
-public function process(Request $request, LlmService $llm)
-{
-    $request->validate([
-        'document' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png'],
-    ]);
+    public function process(Request $request, LlmService $llm)
+    {
+        set_time_limit(120);
 
-    $file = $request->file('document');
+        $request->validate([
+            'document' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png'],
+        ]);
 
-    $storedPath = $file->store('ocr-documents', 'public');
+        $file = $request->file('document');
 
-    $base64 = base64_encode(file_get_contents($file->getRealPath()));
-    $mime   = $file->getMimeType();
+        $storedPath = $file->store('ocr-documents', 'public');
 
-    $ocrResult = $llm->extractTextFromImage($base64, $mime);
+        $base64 = base64_encode(file_get_contents($file->getRealPath()));
+        $mime   = $file->getMimeType();
 
-    return response()->json([
-        'success' => true,
-        'file' => [
-            'original_name' => $file->getClientOriginalName(),
-            'preview_url'   => asset('storage/' . $storedPath),
-            'type'          => $mime,
-        ],
-        'ocr' => $ocrResult,
-    ]);
-}
+        $ocrResult = $llm->extractTextFromImage($base64, $mime);
+
+        return response()->json([
+            'success' => true,
+            'file' => [
+                'original_name' => $file->getClientOriginalName(),
+                'preview_url'   => asset('storage/' . $storedPath),
+                'type'          => $mime,
+            ],
+            'ocr' => $ocrResult,
+        ]);
+    }
 }

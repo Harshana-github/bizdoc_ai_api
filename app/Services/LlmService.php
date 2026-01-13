@@ -24,13 +24,17 @@ class LlmService
 
             $payload = [
                 "model" => $this->model,
+                "request_id" => uniqid('ocr_', true),
                 "messages" => [
                     [
                         "role" => "user",
                         "content" => [
                             [
                                 "type" => "text",
-                                "text" => "Extract all readable text from this document. Return JSON only."
+                                "text" => "Extract all readable text from this document. 
+                                Return JSON only.
+
+                                Request ID: " . uniqid('', true)
                             ],
                             [
                                 "type" => "image_url",
@@ -43,9 +47,14 @@ class LlmService
                 ]
             ];
 
-            $response = Http::timeout(90)
+            $response = Http::timeout(120)
                 ->withToken($this->apiKey)
+                ->withHeaders([
+                    'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+                    'Pragma'        => 'no-cache',
+                ])
                 ->post($endpoint, $payload);
+
 
             if (! $response->successful()) {
                 return [
@@ -59,9 +68,7 @@ class LlmService
                 "error" => false,
                 "data"  => $response->json(),
             ];
-
         } catch (\Throwable $e) {
-            // 🔐 NEVER return null
             return [
                 "error" => true,
                 "exception" => true,

@@ -31,8 +31,34 @@ class LlmService
                         "content" => [
                             [
                                 "type" => "text",
-                                "text" => "Extract all readable text from this document. 
-                                Return JSON only.
+                                "text" => "
+                                Extract all readable information from this document.
+
+                                Return STRICT JSON ONLY.
+                                No markdown. No explanation.
+
+                                Rules:
+                                - Each field must be an object with:
+                                - label: object containing translations
+                                    - en: English label
+                                    - ja: Japanese label
+                                - value: extracted value
+                                - Use snake_case keys
+                                - Preserve document structure
+                                - Arrays must contain objects using the same format
+                                - Do NOT invent values
+                                - If a value is missing, use null
+
+                                Example format:
+                                {
+                                \"invoice_number\": {
+                                    \"label\": {
+                                    \"en\": \"Invoice Number\",
+                                    \"ja\": \"請求書番号\"
+                                    },
+                                    \"value\": \"INV-001\"
+                                }
+                                }
 
                                 Request ID: " . uniqid('', true)
                             ],

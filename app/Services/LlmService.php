@@ -37,6 +37,15 @@ class LlmService
                                 Return STRICT JSON ONLY.
                                 No markdown. No explanation.
 
+                                Mandatory field:
+                                - document_type
+
+                                Rules for document_type:
+                                - Always include a top-level field named \"document_type\"
+                                - document_type must follow the same structure (label + value)
+                                - Choose the value ONLY if clearly indicated by the document title or content
+                                - If the document type is unclear, use value \"Other\"
+
                                 Rules:
                                 - Each field must be an object with:
                                 - label: object containing translations

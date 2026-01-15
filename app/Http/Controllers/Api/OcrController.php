@@ -4,11 +4,18 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\LlmService;
+use App\Services\OcrService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 
 class OcrController extends Controller
 {
+    protected $ocrService;
+
+    public function __construct(OcrService $ocrService)
+    {
+        $this->ocrService = $ocrService;
+    }
+
     public function process(Request $request, LlmService $llm)
     {
         set_time_limit(120);
@@ -30,10 +37,28 @@ class OcrController extends Controller
             'success' => true,
             'file' => [
                 'original_name' => $file->getClientOriginalName(),
+                'stored_path'   => $storedPath,
                 'preview_url'   => asset('storage/' . $storedPath),
                 'type'          => $mime,
             ],
             'ocr' => $ocrResult,
+        ]);
+    }
+
+    public function save(Request $request)
+    {
+        $validated = $request->validate([
+            'id'        => 'nullable|exists:ocr_results,id',
+            'file_path' => 'required|string',
+            'ocr_data'  => 'required|array',
+        ]);
+
+        $ocr = $this->ocrService->save($validated);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'OCR saved successfully',
+            'data'    => $ocr,
         ]);
     }
 }

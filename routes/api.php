@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Artisan;
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\OcrController;
@@ -12,5 +13,24 @@ Route::middleware('auth:api')->group(function () {
     Route::get('/profile', [AuthController::class, 'profile']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
-     Route::post('/ocr/process', [OcrController::class, 'process']);
+    Route::post('/ocr/process', [OcrController::class, 'process']);
+    Route::post('/ocr/save', [OcrController::class, 'save']);
+});
+
+Route::get('/run-migrations', function () {
+    try {
+        Artisan::call('migrate', ['--force' => true]);
+        $output = Artisan::output();
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Migrations ran successfully!',
+            'output' => $output,
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'An error occurred while running migrations.',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
 });

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\OcrResult;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class OcrService
 {
@@ -37,5 +38,21 @@ class OcrService
             'data'      => $validated['ocr_data'],
             'user_id'   => Auth::id(),
         ]);
+    }
+
+    public function history(int $perPage = 10): LengthAwarePaginator
+    {
+        return $this->ocrResult
+            ->where('user_id', Auth::id())
+            ->latest()
+            ->paginate($perPage);
+    }
+
+    public function findById(int $id): OcrResult
+    {
+        return $this->ocrResult
+            ->where('id', $id)
+            ->where('user_id', Auth::id())
+            ->firstOrFail();
     }
 }

@@ -61,4 +61,26 @@ class OcrController extends Controller
             'data'    => $ocr,
         ]);
     }
+
+    public function history(Request $request)
+    {
+        $history = $this->ocrService->history(
+            $request->get('per_page', 10)
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => $history,
+        ]);
+    }
+
+    public function show(int $id)
+    {
+        $ocr = $this->ocrService->findById($id);
+
+        return response()->json([
+            'success' => true,
+            'data' => $ocr,
+        ]);
+    }
 }

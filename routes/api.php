@@ -13,8 +13,12 @@ Route::middleware('auth:api')->group(function () {
     Route::get('/profile', [AuthController::class, 'profile']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
-    Route::post('/ocr/process', [OcrController::class, 'process']);
-    Route::post('/ocr/save', [OcrController::class, 'save']);
+    Route::prefix('ocr')->group(function () {
+        Route::post('/process', [OcrController::class, 'process']);
+        Route::post('/save', [OcrController::class, 'save']);
+        Route::get('/history', [OcrController::class, 'history']);
+        Route::get('/{id}', [OcrController::class, 'show']);
+    });
 });
 
 Route::get('/run-migrations', function () {

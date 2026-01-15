@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\OcrProcess;
 use App\Services\LlmService;
 use App\Services\OcrService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class OcrController extends Controller
 {
@@ -33,8 +35,11 @@ class OcrController extends Controller
 
         $ocrResult = $llm->extractTextFromImage($base64, $mime);
 
+        $process = $this->ocrService->ocrProcessCreate($file, $storedPath, $mime);
+
         return response()->json([
             'success' => true,
+            'process_id' => $process->id,
             'file' => [
                 'original_name' => $file->getClientOriginalName(),
                 'stored_path'   => $storedPath,
@@ -81,6 +86,16 @@ class OcrController extends Controller
         return response()->json([
             'success' => true,
             'data' => $ocr,
+        ]);
+    }
+
+    public function processCount()
+    {
+        $count = $this->ocrService->processCount();
+
+        return response()->json([
+            'success' => true,
+            'count' => $count,
         ]);
     }
 }

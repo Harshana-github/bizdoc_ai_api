@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\OcrProcess;
 use App\Models\OcrResult;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -9,10 +10,12 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 class OcrService
 {
     protected $ocrResult;
+    protected $ocrProcess;
 
-    public function __construct(OcrResult $ocrResult)
+    public function __construct(OcrResult $ocrResult, OcrProcess $ocrProcess)
     {
         $this->ocrResult = $ocrResult;
+        $this->ocrProcess = $ocrProcess;
     }
 
     public function save(array $validated): OcrResult
@@ -38,6 +41,26 @@ class OcrService
             'data'      => $validated['ocr_data'],
             'user_id'   => Auth::id(),
         ]);
+    }
+
+    public function ocrProcessCreate($file, $storedPath, $mime)
+    {
+        return $this->ocrProcess->create([
+            'original_name' => $file->getClientOriginalName(),
+            'stored_path'   => $storedPath,
+            'mime_type'     => $mime,
+            'user_id'       => Auth::id(),
+        ]);
+    }
+
+    public function processCount(): array
+    {
+        return [
+            'total' => $this->ocrProcess->count(),
+            'user'  => $this->ocrProcess
+                ->where('user_id', Auth::id())
+                ->count(),
+        ];
     }
 
     public function history(int $perPage = 10): LengthAwarePaginator

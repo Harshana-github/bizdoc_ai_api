@@ -18,6 +18,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/save', [OcrController::class, 'save']);
         Route::get('/history', [OcrController::class, 'history']);
         Route::get('/process-count', [OcrController::class, 'processCount']);
+        Route::post('/export', [OcrController::class, 'export']);
         Route::get('/{id}', [OcrController::class, 'show']);
     });
 });

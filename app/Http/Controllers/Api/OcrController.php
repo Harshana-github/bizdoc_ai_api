@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exports\OcrExcelExport;
 use App\Http\Controllers\Controller;
-use App\Models\OcrProcess;
 use App\Services\LlmService;
 use App\Services\OcrService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Maatwebsite\Excel\Facades\Excel;
+use Maatwebsite\Excel\Excel as ExcelExcel;
+
 
 class OcrController extends Controller
 {
@@ -97,5 +99,22 @@ class OcrController extends Controller
             'success' => true,
             'count' => $count,
         ]);
+    }
+
+    public function export(Request $request)
+    {
+        $request->validate([
+            'doc'  => 'required|array',
+            'lang' => 'nullable|string',
+            'type' => 'required|in:excel,csv',
+        ]);
+
+        $export = new OcrExcelExport($request->doc, $request->lang ?? 'en');
+
+        if ($request->type === 'csv') {
+            return Excel::download($export, 'document.csv', ExcelExcel::CSV);
+        }
+
+        return Excel::download($export, 'document.xlsx', ExcelExcel::XLSX);
     }
 }

@@ -36,4 +36,17 @@ class TemplateController extends Controller
             'data'    => $template,
         ]);
     }
+
+    public function exportTemplate(Request $request)
+    {
+        $request->validate([
+            'doc'  => 'required|array',
+            'lang' => 'nullable|string',
+        ]);
+
+        return $this->templateService->exportFromTemplate(
+            $request->doc,
+            $request->lang ?? 'en'
+        );
+    }
 }

@@ -106,8 +106,13 @@ class OcrController extends Controller
         $request->validate([
             'doc'  => 'required|array',
             'lang' => 'nullable|string',
-            'type' => 'required|in:excel,csv',
+            'type' => 'required|in:excel,csv,template',
         ]);
+
+        if ($request->type === 'template') {
+            return app(TemplateController::class)
+                ->exportTemplate($request);
+        }
 
         $export = new OcrExcelExport($request->doc, $request->lang ?? 'en');
 

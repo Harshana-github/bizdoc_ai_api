@@ -45,6 +45,8 @@ class LlmService
                                 - document_type must follow the same structure (label + value)
                                 - Choose the value ONLY if clearly indicated by the document title or content
                                 - If the document type is unclear, use value \"Other\"
+                                - Do NOT output Japanese text inside document_type.value
+                                - The VALUE of document_type MUST ALWAYS be in ENGLISH
 
                                 Rules:
                                 - Each field must be an object with:

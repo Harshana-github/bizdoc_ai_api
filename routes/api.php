@@ -5,12 +5,15 @@ use Illuminate\Support\Facades\Artisan;
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\OcrController;
+use App\Http\Controllers\Api\SystemSettingController;
 use App\Models\OcrProcess;
 use App\Models\OcrResult;
 use Illuminate\Support\Facades\Storage;
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+Route::get('/system-settings', [SystemSettingController::class, 'index']);
+Route::post('/system-settings', [SystemSettingController::class, 'update']);
 
 Route::middleware('auth:api')->group(function () {
     Route::get('/profile', [AuthController::class, 'profile']);

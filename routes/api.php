@@ -5,6 +5,9 @@ use Illuminate\Support\Facades\Artisan;
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\OcrController;
+use App\Models\OcrProcess;
+use App\Models\OcrResult;
+use Illuminate\Support\Facades\Storage;
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
@@ -37,6 +40,27 @@ Route::get('/run-migrations', function () {
             'status' => 'error',
             'message' => 'An error occurred while running migrations.',
             'error' => $e->getMessage(),
+        ], 500);
+    }
+});
+
+Route::get('/clear-ocr-history', function () {
+    try {
+
+        OcrResult::truncate();
+        OcrProcess::truncate();
+
+        Storage::disk('public')->deleteDirectory('ocr-documents');
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'OCR history and files cleared successfully.'
+        ]);
+    } catch (\Exception $e) {
+
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage()
         ], 500);
     }
 });

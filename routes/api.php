@@ -64,3 +64,12 @@ Route::get('/clear-ocr-history', function () {
         ], 500);
     }
 });
+
+Route::get('/clear-cache', function () {
+    $exitCode = Artisan::call('cache:clear');
+    $exitCode = Artisan::call('config:clear');
+    $exitCode = Artisan::call('route:clear');
+    $exitCode = Artisan::call('view:clear');
+    $exitCode = Artisan::call('optimize');
+    return '<h1>Cache Cleared</h1>';
+});

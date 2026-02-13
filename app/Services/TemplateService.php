@@ -8,17 +8,20 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use App\Services\LlmService;
 
 
 class TemplateService
 {
     protected $template;
     protected $document_type;
+    protected $llmService;
 
-    public function __construct(Template $template, DocumentType $document_type)
+    public function __construct(Template $template, DocumentType $document_type, LlmService $llmService)
     {
         $this->template = $template;
         $this->document_type = $document_type;
+        $this->llmService = $llmService;
     }
 
     /**
@@ -104,6 +107,21 @@ class TemplateService
 
         /*
         |--------------------------------------------------------------------------
+        | Load Template Map From Config
+        |--------------------------------------------------------------------------
+        */
+
+        $templateConfig = config("template_maps.{$documentType->key}");
+
+        if (!$templateConfig) {
+            return response()->json([
+                'success' => false,
+                'key' => 'template_not_configured',
+            ], 404);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
         | Get Template
         |--------------------------------------------------------------------------
         */
@@ -139,47 +157,21 @@ class TemplateService
 
         /*
         |--------------------------------------------------------------------------
-        | Insert Data Into Template
+        | Insert Data Based On Document Type
         |--------------------------------------------------------------------------
         */
 
-        $quotation_number = $doc['quotation_number']['value'] ?? '';
-        $issue_date = $doc['issue_date']['value'] ?? '';
+        switch ($documentType->key) {
 
-        // If F3:J3 is merged, set value only to F3
-        $sheet->setCellValue('F3', $quotation_number);
-        // If AH3:AO3 is merged, set value only to F3
-        $sheet->setCellValue('AH3', $issue_date);
+            case 'quotation':
+                $this->fillQuotationTemplate($sheet, $doc, $templateConfig);
+                break;
 
-        $lineItems = $doc['line_items'] ?? [];
-
-        $startRow = 19;
-
-
-        foreach ($lineItems as $index => $item) {
-
-            $row = $startRow + $index;
-
-            $itemName  = $item['item_name']['value'] ?? '';
-            $quantity  = $item['quantity']['value'] ?? '';
-            $unit      = $item['unit']['value'] ?? '';
-            $unitPrice = $item['unit_price']['value'] ?? '';
-            $amount    = $item['amount']['value'] ?? '';
-
-            // A–T (merged)
-            $sheet->setCellValue("A{$row}", $itemName);
-
-            // U–Y (merged)
-            $sheet->setCellValue("U{$row}", $quantity);
-
-            // Z–AC (merged)
-            $sheet->setCellValue("Z{$row}", $unit);
-
-            // AD–AI (merged)
-            $sheet->setCellValue("AD{$row}", $unitPrice);
-
-            // AJ–AO (merged)
-            $sheet->setCellValue("AJ{$row}", $amount);
+            default:
+                return response()->json([
+                    'success' => false,
+                    'key' => 'template_not_configured',
+                ], 404);
         }
 
         /*
@@ -210,5 +202,107 @@ class TemplateService
             'Content-Disposition' => 'attachment; filename="' . basename($template->file_name) . '"',
             'Cache-Control' => 'max-age=0',
         ]);
+    }
+
+    private function fillQuotationTemplate(
+        $sheet,
+        array $doc,
+        array $templateConfig
+    ): void {
+
+        set_time_limit(120);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Step 1: Normalize Using LLM
+        |--------------------------------------------------------------------------
+        */
+
+        $normalizedDoc = $this->llmService->normalizeWithLlm(
+            $doc,
+            $templateConfig['expected_fields']
+        );
+
+        $normalizedDoc = $this->enforceNumericFields($normalizedDoc);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Step 2: Get Excel Mapping Config
+        |--------------------------------------------------------------------------
+        */
+
+        $excelMap = $templateConfig['excel_mapping'];
+
+        /*
+        |--------------------------------------------------------------------------
+        | Step 3: Map Simple Fields (quotation_number, issue_date, etc.)
+        |--------------------------------------------------------------------------
+        */
+
+        foreach ($excelMap as $field => $mapping) {
+
+            // Skip line_items (handled separately)
+            if ($field === 'line_items') {
+                continue;
+            }
+
+            $value = $normalizedDoc[$field] ?? '';
+
+            $sheet->setCellValue($mapping, $value);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Step 4: Map Line Items Dynamically
+        |--------------------------------------------------------------------------
+        */
+
+        if (isset($excelMap['line_items'])) {
+
+            $lineConfig = $excelMap['line_items'];
+
+            $startRow = $lineConfig['start_row'] ?? 1;
+            $columns  = $lineConfig['columns'] ?? [];
+
+            $lineItems = $normalizedDoc['line_items'] ?? [];
+
+            foreach ($lineItems as $index => $item) {
+
+                $row = $startRow + $index;
+
+                foreach ($columns as $fieldName => $columnLetter) {
+
+                    $value = $item[$fieldName] ?? '';
+
+                    $sheet->setCellValue("{$columnLetter}{$row}", $value);
+                }
+            }
+        }
+    }
+
+    private function enforceNumericFields(array $data): array
+    {
+        if (!isset($data['line_items']) || !is_array($data['line_items'])) {
+            return $data;
+        }
+
+        foreach ($data['line_items'] as &$item) {
+
+            foreach (['quantity', 'unit_price', 'amount'] as $numericField) {
+
+                if (isset($item[$numericField])) {
+
+                    // Remove commas if any (e.g., "1,000")
+                    $cleanValue = str_replace(',', '', $item[$numericField]);
+
+                    // Cast to float
+                    $item[$numericField] = is_numeric($cleanValue)
+                        ? (float) $cleanValue
+                        : 0;
+                }
+            }
+        }
+
+        return $data;
     }
 }

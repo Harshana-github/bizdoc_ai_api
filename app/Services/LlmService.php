@@ -113,4 +113,49 @@ class LlmService
             ];
         }
     }
+
+    public function normalizeWithLlm(array $ocrData, array $expectedFields): array
+    {
+        $endpoint = "{$this->baseUrl}/chat/completions";
+
+        $payload = [
+            "model" => $this->model,
+            "messages" => [
+                [
+                    "role" => "user",
+                    "content" => "
+                        You are a JSON normalization engine.
+
+                        Keep values unchanged.
+                        Rename keys to match template structure.
+                        Ensure required fields exist.
+                        Return STRICT JSON only.
+                        
+                        Important:
+                        - quantity must be a number
+                        - unit_price must be a number
+                        - amount must be a number
+                        - Do NOT wrap numeric values in quotes
+                        - If value is missing return null
+
+                        OCR DATA:
+                        " . json_encode($ocrData, JSON_UNESCAPED_UNICODE) . "
+
+                        TEMPLATE STRUCTURE:
+                        " . json_encode($expectedFields, JSON_UNESCAPED_UNICODE)
+                ]
+            ]
+        ];
+
+        $response = Http::withToken($this->apiKey)
+            ->post($endpoint, $payload);
+
+        $data = $response->json();
+
+        $content = $data['choices'][0]['message']['content'] ?? '{}';
+
+        $clean = trim(str_replace(['```json', '```'], '', $content));
+
+        return json_decode($clean, true) ?? [];
+    }
 }

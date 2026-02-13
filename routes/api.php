@@ -4,8 +4,10 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Artisan;
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DocumentTypeController;
 use App\Http\Controllers\Api\OcrController;
 use App\Http\Controllers\Api\SystemSettingController;
+use App\Http\Controllers\Api\TemplateController;
 use App\Models\OcrProcess;
 use App\Models\OcrResult;
 use Illuminate\Support\Facades\Storage;
@@ -14,6 +16,15 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/system-settings', [SystemSettingController::class, 'index']);
 Route::post('/system-settings', [SystemSettingController::class, 'update']);
+
+Route::prefix('document-types')->group(function () {
+    Route::get('/', [DocumentTypeController::class, 'index']);
+});
+
+Route::prefix('templates')->group(function () {
+    Route::post('/', [TemplateController::class, 'store']);
+    Route::put('/{id}', [TemplateController::class, 'update']);
+});
 
 Route::middleware('auth:api')->group(function () {
     Route::get('/profile', [AuthController::class, 'profile']);
@@ -75,4 +86,27 @@ Route::get('/clear-cache', function () {
     $exitCode = Artisan::call('view:clear');
     $exitCode = Artisan::call('optimize');
     return '<h1>Cache Cleared</h1>';
+});
+
+Route::get('/run-document-type-seed', function () {
+    try {
+        Artisan::call('db:seed', [
+            '--class' => 'Database\\Seeders\\DocumentTypeSeeder',
+            '--force' => true,
+        ]);
+
+        $output = Artisan::output();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'DocumentTypeSeeder executed successfully!',
+            'output' => $output,
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Failed to run DocumentTypeSeeder.',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
 });

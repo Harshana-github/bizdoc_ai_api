@@ -8,15 +8,18 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('system_settings', function (Blueprint $table) {
+        Schema::create('templates', function (Blueprint $table) {
             $table->id();
-            $table->string('company_name')->default('My Company');
+            $table->foreignId('document_type_id')
+                ->constrained('document_types')
+                ->cascadeOnDelete();
+            $table->string('file_name');
             $table->timestamps();
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('system_settings');
+        Schema::dropIfExists('templates');
     }
 };

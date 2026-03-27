@@ -37,4 +37,8 @@ return [
         'model' => env('LLM_MODEL'),
     ],
 
+    'gemini' => [
+        'key' => env('GEMINI_API_KEY'),
+    ],
+
 ];

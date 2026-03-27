@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\DocumentTypeController;
 use App\Http\Controllers\Api\OcrController;
 use App\Http\Controllers\Api\SystemSettingController;
 use App\Http\Controllers\Api\TemplateController;
+use App\Http\Controllers\Api\ImageCategorizerController;
+use App\Http\Controllers\ImageController;
 use App\Models\OcrProcess;
 use App\Models\OcrResult;
 use Illuminate\Support\Facades\Storage;
@@ -38,6 +40,18 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/export', [OcrController::class, 'export']);
         Route::get('/{id}', [OcrController::class, 'show']);
     });
+
+    // Route::prefix('image-categorizer')->group(function () {
+    //     Route::get('/images/{jobCode}', [ImageCategorizerController::class, 'getImages']);
+    //     Route::delete('/images', [ImageCategorizerController::class, 'deleteImages']);
+    //     Route::post('/upload', [ImageCategorizerController::class, 'upload']);
+    //     Route::post('/report', [ImageCategorizerController::class, 'generateReport']);
+    // });
+
+    Route::get('/images', [ImageController::class, 'index']);
+    Route::post('/images/upload', [ImageController::class, 'upload']);
+    Route::post('/images/delete', [ImageController::class, 'deleteMultiple']);
+    Route::post('/images/generate-report', [ImageController::class, 'generateReport']);
 });
 
 Route::get('/run-migrations', function () {

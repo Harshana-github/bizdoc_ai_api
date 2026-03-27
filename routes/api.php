@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\ImageCategorizerController;
 use App\Http\Controllers\ImageController;
 use App\Models\OcrProcess;
 use App\Models\OcrResult;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
 Route::post('/register', [AuthController::class, 'register']);
@@ -21,6 +22,48 @@ Route::post('/system-settings', [SystemSettingController::class, 'update']);
 
 Route::prefix('document-types')->group(function () {
     Route::get('/', [DocumentTypeController::class, 'index']);
+});
+
+Route::get('/test-gemini', function () {
+    try {
+        $apiKey = env('GEMINI_API_KEY');
+
+        if (!$apiKey) {
+            return response()->json([
+                'success' => false,
+                'message' => 'GEMINI_API_KEY not found in .env',
+            ], 500);
+        }
+
+        $response = Http::withHeaders([
+            'Content-Type' => 'application/json',
+        ])->post(
+            "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={$apiKey}",
+            [
+                "contents" => [
+                    [
+                        "parts" => [
+                            ["text" => "Say hello from Gemini API test."]
+                        ]
+                    ]
+                ]
+            ]
+        );
+
+        return response()->json([
+            'success' => $response->successful(),
+            'status' => $response->status(),
+            'env_key_exists' => !empty($apiKey),
+            'response' => $response->json(),
+            'raw_body' => $response->body(),
+        ], $response->status());
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Request failed',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
 });
 
 Route::prefix('templates')->group(function () {

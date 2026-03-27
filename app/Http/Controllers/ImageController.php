@@ -14,7 +14,7 @@ class ImageController extends Controller
 
     public function __construct()
     {
-        $this->geminiKey = env('GEMINI_API_KEY');
+        $this->geminiKey = config('gemini.api_key');
         $this->endpoint = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}";
     }
 

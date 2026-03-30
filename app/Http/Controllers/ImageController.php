@@ -15,9 +15,6 @@ class ImageController extends Controller
     public function __construct()
     {
         $this->geminiKey = config('gemini.api_key');
-        if (!$this->geminiKey) {
-            $this->geminiKey = env('GEMINI_API_KEY');
-        }
         $this->endpoint = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}";
     }
 
@@ -91,67 +88,263 @@ class ImageController extends Controller
         ], 200);
     }
 
-    /*
-    -------------------------------------------------------------------------
-    NEW FUNCTION: Compress and Resize Image before sending to AI
-    -------------------------------------------------------------------------
-    */
-    private function compressAndEncodeImage($fullPath)
-    {
-        $mime = mime_content_type($fullPath);
-        $image = null;
+    // public function generateReport(Request $request)
+    // {
+    //     set_time_limit(120);
 
-        if ($mime == 'image/jpeg' || $mime == 'image/jpg') {
-            $image = @imagecreatefromjpeg($fullPath);
-        } elseif ($mime == 'image/png') {
-            $image = @imagecreatefrompng($fullPath);
-        } elseif ($mime == 'image/webp') {
-            $image = @imagecreatefromwebp($fullPath);
-        }
+    //     $request->validate([
+    //         'ids' => 'required|array',
+    //         'ids.*' => 'exists:images,id'
+    //     ]);
 
-        if (!$image) {
-            return base64_encode(file_get_contents($fullPath));
-        }
+    //     try {
+    //         $images = Image::whereIn('id', $request->ids)->get();
 
-        $width = imagesx($image);
-        $height = imagesy($image);
-        $maxSize = 1024;
+    //         if ($images->isEmpty()) {
+    //             return response()->json(["message" => "No valid images found"], 422);
+    //         }
 
-        if ($width > $maxSize || $height > $maxSize) {
-            if ($width > $height) {
-                $newWidth = $maxSize;
-                $newHeight = intval($height * ($maxSize / $width));
-            } else {
-                $newHeight = $maxSize;
-                $newWidth = intval($width * ($maxSize / $height));
-            }
+    //         /*
+    //         --------------------------------
+    //         Prepare Gemini Classification (Updated for Japanese & Quality check)
+    //         --------------------------------
+    //         */
 
-            $resizedImage = imagecreatetruecolor($newWidth, $newHeight);
+    //         $parts = [];
+    //         $parts[] = [
+    //             "text" => "
+    //             You are analyzing cleaning inspection photos.
 
-            if ($mime == 'image/png') {
-                imagealphablending($resizedImage, false);
-                imagesavealpha($resizedImage, true);
-                $transparent = imagecolorallocatealpha($resizedImage, 255, 255, 255, 127);
-                imagefilledrectangle($resizedImage, 0, 0, $newWidth, $newHeight, $transparent);
-            }
+    //             For each image return JSON:
+    //             [
+    //               {\"image_index\": 0, \"room_type\": \"リビングルーム\", \"stage\": \"before\", \"quality_score\": 8}
+    //             ]
 
-            imagecopyresampled($resizedImage, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
-            $image = $resizedImage;
-        }
+    //             Rules:
+    //             - stage must be strictly 'before' or 'after'.
+    //             - room_type MUST be categorized and translated into Japanese (e.g., リビングルーム, キッチン, バスルーム, トイレ, 寝室).
+    //             - quality_score (0-10) indicates image clarity and usefulness.
+    //             - CRITICAL: Give a quality_score of 0 if the image is highly blurred, completely dark, irrelevant to cleaning, or a duplicate of a better image.
+    //             - image_index must match the order of images provided, starting from 0.
 
-        ob_start();
-        imagejpeg($image, null, 80);
-        $compressedImageData = ob_get_clean();
+    //             Return ONLY valid JSON. Do not wrap in markdown tags like ```json.
+    //             "
+    //         ];
 
-        imagedestroy($image);
+    //         $imageMap = [];
+    //         $validIndex = 0;
 
-        return base64_encode($compressedImageData);
-    }
+    //         foreach ($images as $img) {
+    //             if (Storage::disk('public')->exists($img->file_path)) {
+    //                 $imageMap[$validIndex] = $img;
+
+    //                 $fullPath = storage_path('app/public/' . $img->file_path);
+    //                 $fileContent = file_get_contents($fullPath);
+    //                 $mimeType = mime_content_type($fullPath);
+    //                 $base64 = base64_encode($fileContent);
+
+    //                 $parts[] = [
+    //                     "inline_data" => [
+    //                         "mime_type" => $mimeType,
+    //                         "data" => $base64
+    //                     ]
+    //                 ];
+
+    //                 $validIndex++;
+    //             }
+    //         }
+
+    //         $payload = [
+    //             "contents" => [
+    //                 [
+    //                     "parts" => $parts
+    //                 ]
+    //             ]
+    //         ];
+
+    //         $response = Http::timeout(120)
+    //             ->withHeaders([
+    //                 "Content-Type" => "application/json"
+    //             ])
+    //             ->post($this->endpoint, $payload);
+
+    //         if (!$response->successful()) {
+    //             return response()->json([
+    //                 "error" => "Gemini request failed",
+    //                 "details" => $response->body()
+    //             ], 500);
+    //         }
+
+    //         $text = $response['candidates'][0]['content']['parts'][0]['text'] ?? '';
+    //         $text = trim($text);
+    //         $text = preg_replace('/^```json/', '', $text);
+    //         $text = preg_replace('/```$/', '', $text);
+
+    //         $analysis = json_decode($text, true);
+
+    //         if (!$analysis) {
+    //             return response()->json([
+    //                 "error" => "Failed to parse Gemini response",
+    //                 "raw" => $text
+    //             ], 500);
+    //         }
+
+    //         /*
+    //         --------------------------------
+    //         Select Best Before/After Images
+    //         --------------------------------
+    //         */
+
+    //         $report = [];
+
+    //         foreach ($analysis as $item) {
+    //             $index = $item['image_index'];
+    //             // Removed strtolower here because room_type is in Japanese now
+    //             $room = trim($item['room_type']);
+    //             $stage = strtolower(trim($item['stage']));
+    //             $score = (int) $item['quality_score'];
+
+    //             // Skip blurry, irrelevant, or duplicate images completely
+    //             if ($score <= 0) {
+    //                 continue;
+    //             }
+
+    //             if (!isset($imageMap[$index])) {
+    //                 continue;
+    //             }
+
+    //             $image = $imageMap[$index];
+
+    //             if (
+    //                 !isset($report[$room][$stage]) ||
+    //                 $report[$room][$stage]['score'] < $score
+    //             ) {
+    //                 $report[$room][$stage] = [
+    //                     "id" => $image->id,
+    //                     "url" => asset('storage/' . $image->file_path),
+    //                     "file_path" => $image->file_path,
+    //                     "score" => $score
+    //                 ];
+    //             }
+    //         }
+
+    //         /*
+    //         --------------------------------
+    //         Remove incomplete rooms
+    //         --------------------------------
+    //         */
+
+    //         foreach ($report as $room => $data) {
+    //             if (!isset($data['before']) || !isset($data['after'])) {
+    //                 unset($report[$room]);
+    //             }
+    //         }
+
+    //         /*
+    //         --------------------------------
+    //         Generate AI Cleaning Description (In Japanese)
+    //         --------------------------------
+    //         */
+
+    //         foreach ($report as $room => $data) {
+    //             $description = $this->generateCleaningDescription(
+    //                 $data['before']['file_path'],
+    //                 $data['after']['file_path']
+    //             );
+
+    //             $report[$room]['description'] = $description;
+    //         }
+
+    //         /*
+    //         Remove score and file_path before returning to frontend
+    //         */
+
+    //         foreach ($report as $room => $data) {
+    //             unset($report[$room]['before']['score']);
+    //             unset($report[$room]['after']['score']);
+    //             unset($report[$room]['before']['file_path']);
+    //             unset($report[$room]['after']['file_path']);
+    //         }
+
+    //         return response()->json([
+    //             "success" => true,
+    //             "data" => $report
+    //         ], 200);
+    //     } catch (\Throwable $e) {
+    //         return response()->json([
+    //             "error" => "Internal server error",
+    //             "message" => $e->getMessage(),
+    //             "line" => $e->getLine()
+    //         ], 500);
+    //     }
+    // }
+
+    // private function generateCleaningDescription($beforePath, $afterPath)
+    // {
+    //     try {
+    //         if (!Storage::disk('public')->exists($beforePath) || !Storage::disk('public')->exists($afterPath)) {
+    //             return "清掃による改善が確認されました。"; // Japanese default message
+    //         }
+
+    //         $fullBeforePath = storage_path('app/public/' . $beforePath);
+    //         $fullAfterPath = storage_path('app/public/' . $afterPath);
+
+    //         $beforeBase64 = base64_encode(file_get_contents($fullBeforePath));
+    //         $beforeMime = mime_content_type($fullBeforePath);
+
+    //         $afterBase64 = base64_encode(file_get_contents($fullAfterPath));
+    //         $afterMime = mime_content_type($fullAfterPath);
+
+    //         $payload = [
+    //             "contents" => [
+    //                 [
+    //                     "parts" => [
+    //                         [
+    //                             "text" => "
+    //                             Compare two cleaning images.
+    //                             Image 1 = BEFORE cleaning
+    //                             Image 2 = AFTER cleaning
+    //                             Describe the cleaning improvement in one short, professional sentence.
+    //                             IMPORTANT: The response MUST be written entirely in Japanese.
+    //                             "
+    //                         ],
+    //                         [
+    //                             "inline_data" => [
+    //                                 "mime_type" => $beforeMime,
+    //                                 "data" => $beforeBase64
+    //                             ]
+    //                         ],
+    //                         [
+    //                             "inline_data" => [
+    //                                 "mime_type" => $afterMime,
+    //                                 "data" => $afterBase64
+    //                             ]
+    //                         ]
+    //                     ]
+    //                 ]
+    //             ]
+    //         ];
+
+    //         $response = Http::timeout(60)
+    //             ->withHeaders([
+    //                 "Content-Type" => "application/json"
+    //             ])
+    //             ->post($this->endpoint, $payload);
+
+    //         if (!$response->successful()) {
+    //             return "清掃が正常に完了しました。"; // Japanese fallback message
+    //         }
+
+    //         return trim($response['candidates'][0]['content']['parts'][0]['text'] ?? "清掃が完了しました。");
+    //     } catch (\Throwable $e) {
+    //         return "清掃が完了しました。(エラー: " . $e->getMessage() . ")"; // Japanese error fallback
+    //     }
+    // }
+    
 
     public function generateReport(Request $request)
     {
-        ini_set('memory_limit', '512M');
-        set_time_limit(300);
+        set_time_limit(180); // කාලය ටිකක් වැඩි කළා
 
         $request->validate([
             'ids' => 'required|array',
@@ -201,10 +394,9 @@ class ImageController extends Controller
                     $imageMap[$validIndex] = $img;
 
                     $fullPath = storage_path('app/public/' . $img->file_path);
-
-                    // 2. Use the new compression function
-                    $base64 = $this->compressAndEncodeImage($fullPath);
-                    $mimeType = 'image/jpeg'; // Since our function converts everything to JPEG
+                    $fileContent = file_get_contents($fullPath);
+                    $mimeType = mime_content_type($fullPath);
+                    $base64 = base64_encode($fileContent);
 
                     $parts[] = [
                         "inline_data" => [
@@ -262,6 +454,7 @@ class ImageController extends Controller
 
             foreach ($analysis as $item) {
                 $index = $item['image_index'];
+                // 'room_type' වෙනුවට 'category' පාවිච්චි කරනවා
                 $category = trim($item['category']);
                 $stage = strtolower(trim($item['stage']));
                 $score = (int) $item['quality_score'];
@@ -341,11 +534,9 @@ class ImageController extends Controller
         }
     }
 
+    // Function නම වෙනස් කළා Cleaning විතරක් නෙවෙයි නිසා
     private function generateInspectionDescription($beforePath, $afterPath)
     {
-        // Server Limits Bypass
-        ini_set('memory_limit', '512M');
-
         try {
             if (!Storage::disk('public')->exists($beforePath) || !Storage::disk('public')->exists($afterPath)) {
                 return "作業による改善が確認されました。"; // Changed fallback message
@@ -354,12 +545,11 @@ class ImageController extends Controller
             $fullBeforePath = storage_path('app/public/' . $beforePath);
             $fullAfterPath = storage_path('app/public/' . $afterPath);
 
-            // 3. Use the new compression function for description generation too
-            $beforeBase64 = $this->compressAndEncodeImage($fullBeforePath);
-            $beforeMime = 'image/jpeg';
+            $beforeBase64 = base64_encode(file_get_contents($fullBeforePath));
+            $beforeMime = mime_content_type($fullBeforePath);
 
-            $afterBase64 = $this->compressAndEncodeImage($fullAfterPath);
-            $afterMime = 'image/jpeg';
+            $afterBase64 = base64_encode(file_get_contents($fullAfterPath));
+            $afterMime = mime_content_type($fullAfterPath);
 
             $payload = [
                 "contents" => [

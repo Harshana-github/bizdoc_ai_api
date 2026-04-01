@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\Image;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class ImageController extends Controller
@@ -19,6 +18,7 @@ class ImageController extends Controller
         $this->endpoint = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}";
     }
 
+    // Fetch all images
     public function index()
     {
         $images = Image::orderBy('created_at', 'desc')->get();
@@ -34,6 +34,7 @@ class ImageController extends Controller
         ], 200);
     }
 
+    // Handle multiple image uploads
     public function upload(Request $request)
     {
         $request->validate([
@@ -64,6 +65,7 @@ class ImageController extends Controller
         ], 201);
     }
 
+    // Handle multiple image deletions
     public function deleteMultiple(Request $request)
     {
         $request->validate([
@@ -88,101 +90,70 @@ class ImageController extends Controller
 
     public function generateReport(Request $request)
     {
-        set_time_limit(180);
+        set_time_limit(180); // කාලය ටිකක් වැඩි කළා
 
         $request->validate([
-            'ids' => 'required|array|min:1',
+            'ids' => 'required|array',
             'ids.*' => 'exists:images,id'
         ]);
 
         try {
-            $ids = array_map('intval', $request->ids);
-
-            // frontend order preserve කරන්න
-            $images = Image::whereIn('id', $ids)->get()->sortBy(function ($img) use ($ids) {
-                return array_search($img->id, $ids);
-            })->values();
+            $images = Image::whereIn('id', $request->ids)->get();
 
             if ($images->isEmpty()) {
-                return response()->json([
-                    "success" => false,
-                    "message" => "No valid images found"
-                ], 422);
+                return response()->json(["message" => "No valid images found"], 422);
             }
+
+            /*
+            --------------------------------
+            Prepare Gemini Classification (Updated for Repairs, Replacements & Cleaning)
+            --------------------------------
+            */
 
             $parts = [];
             $parts[] = [
-                "text" => '
-You are analyzing property inspection photos. This includes Cleaning, Repairs, and Part Replacements.
+                "text" => "
+                You are analyzing property inspection photos. This includes Cleaning, Repairs, and Part Replacements.
 
-For each image return JSON:
-[
-  {"image_index": 0, "category": "窓の鍵交換", "stage": "before", "quality_score": 8}
-]
+                For each image return JSON:
+                [
+                  {\"image_index\": 0, \"category\": \"窓の鍵交換\", \"stage\": \"before\", \"quality_score\": 8}
+                ]
 
-Rules:
-- stage must be strictly "before" or "after"
-- category must be in Japanese
-- category should identify the specific task or item shown
-- related BEFORE and AFTER images should use the same category name as much as possible
-- quality_score must be 0 to 10
-- if blurred, dark, duplicate, irrelevant, or unusable, set quality_score to 0
-- image_index must match the order of images provided, starting from 0
+                Rules:
+                - stage must be strictly 'before' or 'after'.
+                - category: Identify the SPECIFIC task or item shown. Examples: '窓の鍵交換' (Window lock replacement), '排水口カバー交換' (Drain cover replacement), 'テープ補修' (Tape repair), 'キッチン清掃' (Kitchen cleaning). MUST be in Japanese.
+                - quality_score (0-10) indicates image clarity and usefulness.
+                - CRITICAL: Group related BEFORE and AFTER images into the EXACT SAME 'category' name so they match perfectly.
+                - CRITICAL: Give a quality_score of 0 if the image is highly blurred, dark, irrelevant, or a duplicate.
+                - image_index must match the order of images provided, starting from 0.
 
-Return ONLY valid JSON. Do not wrap in markdown.
-'
+                Return ONLY valid JSON. Do not wrap in markdown tags like ```json.
+                "
             ];
 
             $imageMap = [];
             $validIndex = 0;
 
             foreach ($images as $img) {
-                if (!Storage::disk('public')->exists($img->file_path)) {
-                    Log::warning('Image file missing', [
-                        'image_id' => $img->id,
-                        'file_path' => $img->file_path
-                    ]);
-                    continue;
+                if (Storage::disk('public')->exists($img->file_path)) {
+                    $imageMap[$validIndex] = $img;
+
+                    $fullPath = storage_path('app/public/' . $img->file_path);
+                    $fileContent = file_get_contents($fullPath);
+                    $mimeType = mime_content_type($fullPath);
+                    $base64 = base64_encode($fileContent);
+
+                    $parts[] = [
+                        "inline_data" => [
+                            "mime_type" => $mimeType,
+                            "data" => $base64
+                        ]
+                    ];
+
+                    $validIndex++;
                 }
-
-                $fullPath = storage_path('app/public/' . $img->file_path);
-
-                $fileContent = @file_get_contents($fullPath);
-                $mimeType = @mime_content_type($fullPath);
-
-                if ($fileContent === false || empty($mimeType)) {
-                    Log::warning('Image read failed', [
-                        'image_id' => $img->id,
-                        'file_path' => $img->file_path
-                    ]);
-                    continue;
-                }
-
-                $imageMap[$validIndex] = $img;
-
-                $parts[] = [
-                    "inline_data" => [
-                        "mime_type" => $mimeType,
-                        "data" => base64_encode($fileContent)
-                    ]
-                ];
-
-                $validIndex++;
             }
-
-            if ($validIndex === 0) {
-                return response()->json([
-                    "success" => false,
-                    "message" => "No readable images found"
-                ], 422);
-            }
-
-            Log::info('Gemini generateReport input summary', [
-                'requested_ids' => $ids,
-                'db_ids_order' => $images->pluck('id')->toArray(),
-                'valid_image_map_ids' => collect($imageMap)->pluck('id')->toArray(),
-                'valid_image_count' => $validIndex,
-            ]);
 
             $payload = [
                 "contents" => [
@@ -199,13 +170,7 @@ Return ONLY valid JSON. Do not wrap in markdown.
                 ->post($this->endpoint, $payload);
 
             if (!$response->successful()) {
-                Log::error('Gemini classification failed', [
-                    'status' => $response->status(),
-                    'body' => $response->body()
-                ]);
-
                 return response()->json([
-                    "success" => false,
                     "error" => "Gemini request failed",
                     "details" => $response->body()
                 ], 500);
@@ -213,47 +178,40 @@ Return ONLY valid JSON. Do not wrap in markdown.
 
             $text = $response['candidates'][0]['content']['parts'][0]['text'] ?? '';
             $text = trim($text);
-            $text = preg_replace('/^```json\s*/i', '', $text);
-            $text = preg_replace('/^```\s*/', '', $text);
-            $text = preg_replace('/\s*```$/', '', $text);
-            $text = trim($text);
-
-            Log::info('Gemini raw classification output', [
-                'text' => $text
-            ]);
+            $text = preg_replace('/^```json/', '', $text);
+            $text = preg_replace('/```$/', '', $text);
 
             $analysis = json_decode($text, true);
 
-            if (!is_array($analysis)) {
+            if (!$analysis) {
                 return response()->json([
-                    "success" => false,
                     "error" => "Failed to parse Gemini response",
                     "raw" => $text
                 ], 500);
             }
 
+            /*
+            --------------------------------
+            Select Best Before/After Images by Category (Not just Room)
+            --------------------------------
+            */
+
             $report = [];
 
             foreach ($analysis as $item) {
-                $index = isset($item['image_index']) ? (int) $item['image_index'] : null;
-                $category = trim($item['category'] ?? '');
-                $stage = strtolower(trim($item['stage'] ?? ''));
-                $score = isset($item['quality_score']) ? (int) $item['quality_score'] : 0;
+                $index = $item['image_index'];
+                // 'room_type' වෙනුවට 'category' පාවිච්චි කරනවා
+                $category = trim($item['category']);
+                $stage = strtolower(trim($item['stage']));
+                $score = (int) $item['quality_score'];
 
-                if ($index === null || !isset($imageMap[$index])) {
+                // Skip blurry, irrelevant, or duplicate images completely
+                if ($score <= 0) {
                     continue;
                 }
 
-                if (!in_array($stage, ['before', 'after'], true)) {
+                if (!isset($imageMap[$index])) {
                     continue;
-                }
-
-                if ($category === '' || $score <= 0) {
-                    continue;
-                }
-
-                if ($score > 10) {
-                    $score = 10;
                 }
 
                 $image = $imageMap[$index];
@@ -271,11 +229,23 @@ Return ONLY valid JSON. Do not wrap in markdown.
                 }
             }
 
+            /*
+            --------------------------------
+            Remove incomplete categories
+            --------------------------------
+            */
+
             foreach ($report as $category => $data) {
                 if (!isset($data['before']) || !isset($data['after'])) {
                     unset($report[$category]);
                 }
             }
+
+            /*
+            --------------------------------
+            Generate AI Description (For Cleaning, Repair, and Replacement)
+            --------------------------------
+            */
 
             foreach ($report as $category => $data) {
                 $description = $this->generateInspectionDescription(
@@ -285,6 +255,10 @@ Return ONLY valid JSON. Do not wrap in markdown.
 
                 $report[$category]['description'] = $description;
             }
+
+            /*
+            Remove score and file_path before returning to frontend
+            */
 
             foreach ($report as $category => $data) {
                 unset($report[$category]['before']['score']);
@@ -298,14 +272,7 @@ Return ONLY valid JSON. Do not wrap in markdown.
                 "data" => $report
             ], 200);
         } catch (\Throwable $e) {
-            Log::error('generateReport exception', [
-                'message' => $e->getMessage(),
-                'line' => $e->getLine(),
-                'file' => $e->getFile()
-            ]);
-
             return response()->json([
-                "success" => false,
                 "error" => "Internal server error",
                 "message" => $e->getMessage(),
                 "line" => $e->getLine()
@@ -313,11 +280,12 @@ Return ONLY valid JSON. Do not wrap in markdown.
         }
     }
 
+    // Function නම වෙනස් කළා Cleaning විතරක් නෙවෙයි නිසා
     private function generateInspectionDescription($beforePath, $afterPath)
     {
         try {
             if (!Storage::disk('public')->exists($beforePath) || !Storage::disk('public')->exists($afterPath)) {
-                return "作業による改善が確認されました。";
+                return "作業による改善が確認されました。"; // Changed fallback message
             }
 
             $fullBeforePath = storage_path('app/public/' . $beforePath);
@@ -334,13 +302,13 @@ Return ONLY valid JSON. Do not wrap in markdown.
                     [
                         "parts" => [
                             [
-                                "text" => '
-Compare these two property maintenance images.
-Image 1 = BEFORE
-Image 2 = AFTER
-Describe the improvement, repair, or replacement that was done in one short, professional sentence.
-IMPORTANT: The response MUST be written entirely in Japanese.
-'
+                                "text" => "
+                                Compare these two property maintenance images.
+                                Image 1 = BEFORE (Cleaning needed, broken part, or missing item)
+                                Image 2 = AFTER (Cleaned, repaired, or replaced)
+                                Describe the improvement, repair, or replacement that was done in one short, professional sentence.
+                                IMPORTANT: The response MUST be written entirely in Japanese.
+                                "
                             ],
                             [
                                 "inline_data" => [
@@ -366,19 +334,12 @@ IMPORTANT: The response MUST be written entirely in Japanese.
                 ->post($this->endpoint, $payload);
 
             if (!$response->successful()) {
-                Log::warning('Gemini description failed', [
-                    'status' => $response->status(),
-                    'body' => $response->body()
-                ]);
                 return "作業が正常に完了しました。";
             }
 
             return trim($response['candidates'][0]['content']['parts'][0]['text'] ?? "作業が完了しました。");
         } catch (\Throwable $e) {
-            Log::warning('generateInspectionDescription exception', [
-                'message' => $e->getMessage()
-            ]);
-            return "作業が完了しました。";
+            return "作業が完了しました。(エラー: " . $e->getMessage() . ")";
         }
     }
 }

@@ -16,7 +16,7 @@ class ImageController extends Controller
     public function __construct()
     {
         $this->geminiKey = config('gemini.api_key');
-        $this->endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}";
+        $this->endpoint = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}";
     }
 
     public function index()
@@ -45,7 +45,7 @@ class ImageController extends Controller
 
         if ($request->hasFile('images')) {
             foreach ($request->file('images') as $file) {
-                $fileName = time() . '_' . uniqid() . '_' . $file->getClientOriginalName();
+                $fileName = time() . '_' . $file->getClientOriginalName();
                 $filePath = $file->storeAs('uploads/images', $fileName, 'public');
 
                 $image = Image::create([
@@ -98,9 +98,10 @@ class ImageController extends Controller
         try {
             $ids = array_map('intval', $request->ids);
 
-            $images = Image::whereIn('id', $ids)
-                ->orderByRaw('FIELD(id, ' . implode(',', $ids) . ')')
-                ->get();
+            // frontend order preserve කරන්න
+            $images = Image::whereIn('id', $ids)->get()->sortBy(function ($img) use ($ids) {
+                return array_search($img->id, $ids);
+            })->values();
 
             if ($images->isEmpty()) {
                 return response()->json([
@@ -111,28 +112,25 @@ class ImageController extends Controller
 
             $parts = [];
             $parts[] = [
-                "text" => <<<TEXT
+                "text" => '
 You are analyzing property inspection photos. This includes Cleaning, Repairs, and Part Replacements.
 
-Return only a JSON array.
-
-Expected format:
+For each image return JSON:
 [
   {"image_index": 0, "category": "窓の鍵交換", "stage": "before", "quality_score": 8}
 ]
 
 Rules:
 - stage must be strictly "before" or "after"
-- category must be short, specific, and entirely in Japanese
-- category must describe the exact task shown
-- examples: "窓の鍵交換", "排水口カバー交換", "テープ補修", "キッチン清掃"
-- related BEFORE and AFTER images must use the exact same category text
-- if image is blurred, dark, duplicate, unrelated, or unusable, set quality_score to 0
-- quality_score must be an integer between 0 and 10
-- image_index must match the order of the provided images starting from 0
+- category must be in Japanese
+- category should identify the specific task or item shown
+- related BEFORE and AFTER images should use the same category name as much as possible
+- quality_score must be 0 to 10
+- if blurred, dark, duplicate, irrelevant, or unusable, set quality_score to 0
+- image_index must match the order of images provided, starting from 0
 
-Return JSON only. No markdown.
-TEXT
+Return ONLY valid JSON. Do not wrap in markdown.
+'
             ];
 
             $imageMap = [];
@@ -149,10 +147,11 @@ TEXT
 
                 $fullPath = storage_path('app/public/' . $img->file_path);
 
-                $optimized = $this->prepareImageForGemini($fullPath);
+                $fileContent = @file_get_contents($fullPath);
+                $mimeType = @mime_content_type($fullPath);
 
-                if (!$optimized) {
-                    Log::warning('Image optimize failed', [
+                if ($fileContent === false || empty($mimeType)) {
+                    Log::warning('Image read failed', [
                         'image_id' => $img->id,
                         'file_path' => $img->file_path
                     ]);
@@ -163,8 +162,8 @@ TEXT
 
                 $parts[] = [
                     "inline_data" => [
-                        "mime_type" => $optimized['mime_type'],
-                        "data" => $optimized['base64']
+                        "mime_type" => $mimeType,
+                        "data" => base64_encode($fileContent)
                     ]
                 ];
 
@@ -190,43 +189,10 @@ TEXT
                     [
                         "parts" => $parts
                     ]
-                ],
-                "generationConfig" => [
-                    "temperature" => 0.2,
-                    "topP" => 0.8,
-                    "response_mime_type" => "application/json",
-                    "response_schema" => [
-                        "type" => "ARRAY",
-                        "items" => [
-                            "type" => "OBJECT",
-                            "properties" => [
-                                "image_index" => [
-                                    "type" => "INTEGER"
-                                ],
-                                "category" => [
-                                    "type" => "STRING"
-                                ],
-                                "stage" => [
-                                    "type" => "STRING",
-                                    "enum" => ["before", "after"]
-                                ],
-                                "quality_score" => [
-                                    "type" => "INTEGER"
-                                ]
-                            ],
-                            "required" => [
-                                "image_index",
-                                "category",
-                                "stage",
-                                "quality_score"
-                            ]
-                        ]
-                    ]
                 ]
             ];
 
             $response = Http::timeout(120)
-                ->acceptJson()
                 ->withHeaders([
                     "Content-Type" => "application/json"
                 ])
@@ -245,7 +211,7 @@ TEXT
                 ], 500);
             }
 
-            $text = data_get($response->json(), 'candidates.0.content.parts.0.text', '');
+            $text = $response['candidates'][0]['content']['parts'][0]['text'] ?? '';
             $text = trim($text);
             $text = preg_replace('/^```json\s*/i', '', $text);
             $text = preg_replace('/^```\s*/', '', $text);
@@ -270,7 +236,7 @@ TEXT
 
             foreach ($analysis as $item) {
                 $index = isset($item['image_index']) ? (int) $item['image_index'] : null;
-                $category = $this->normalizeCategory($item['category'] ?? '');
+                $category = trim($item['category'] ?? '');
                 $stage = strtolower(trim($item['stage'] ?? ''));
                 $score = isset($item['quality_score']) ? (int) $item['quality_score'] : 0;
 
@@ -282,11 +248,7 @@ TEXT
                     continue;
                 }
 
-                if ($category === '') {
-                    continue;
-                }
-
-                if ($score <= 0) {
+                if ($category === '' || $score <= 0) {
                     continue;
                 }
 
@@ -315,13 +277,10 @@ TEXT
                 }
             }
 
-            ksort($report);
-
             foreach ($report as $category => $data) {
                 $description = $this->generateInspectionDescription(
                     $data['before']['file_path'],
-                    $data['after']['file_path'],
-                    $category
+                    $data['after']['file_path']
                 );
 
                 $report[$category]['description'] = $description;
@@ -338,7 +297,6 @@ TEXT
                 "success" => true,
                 "data" => $report
             ], 200);
-
         } catch (\Throwable $e) {
             Log::error('generateReport exception', [
                 'message' => $e->getMessage(),
@@ -355,68 +313,53 @@ TEXT
         }
     }
 
-    private function generateInspectionDescription($beforePath, $afterPath, $category = '')
+    private function generateInspectionDescription($beforePath, $afterPath)
     {
         try {
-            if (
-                !Storage::disk('public')->exists($beforePath) ||
-                !Storage::disk('public')->exists($afterPath)
-            ) {
+            if (!Storage::disk('public')->exists($beforePath) || !Storage::disk('public')->exists($afterPath)) {
                 return "作業による改善が確認されました。";
             }
 
             $fullBeforePath = storage_path('app/public/' . $beforePath);
             $fullAfterPath = storage_path('app/public/' . $afterPath);
 
-            $beforePrepared = $this->prepareImageForGemini($fullBeforePath, 1024, 78);
-            $afterPrepared = $this->prepareImageForGemini($fullAfterPath, 1024, 78);
+            $beforeBase64 = base64_encode(file_get_contents($fullBeforePath));
+            $beforeMime = mime_content_type($fullBeforePath);
 
-            if (!$beforePrepared || !$afterPrepared) {
-                return "作業による改善が確認されました。";
-            }
-
-            $prompt = <<<TEXT
-Compare these two property maintenance images.
-
-Image 1 = BEFORE
-Image 2 = AFTER
-
-Task category: {$category}
-
-Describe the improvement, repair, replacement, or cleaning work that was completed.
-Write only one short professional sentence.
-The response must be entirely in Japanese.
-TEXT;
+            $afterBase64 = base64_encode(file_get_contents($fullAfterPath));
+            $afterMime = mime_content_type($fullAfterPath);
 
             $payload = [
                 "contents" => [
                     [
                         "parts" => [
                             [
-                                "text" => $prompt
+                                "text" => '
+Compare these two property maintenance images.
+Image 1 = BEFORE
+Image 2 = AFTER
+Describe the improvement, repair, or replacement that was done in one short, professional sentence.
+IMPORTANT: The response MUST be written entirely in Japanese.
+'
                             ],
                             [
                                 "inline_data" => [
-                                    "mime_type" => $beforePrepared['mime_type'],
-                                    "data" => $beforePrepared['base64']
+                                    "mime_type" => $beforeMime,
+                                    "data" => $beforeBase64
                                 ]
                             ],
                             [
                                 "inline_data" => [
-                                    "mime_type" => $afterPrepared['mime_type'],
-                                    "data" => $afterPrepared['base64']
+                                    "mime_type" => $afterMime,
+                                    "data" => $afterBase64
                                 ]
                             ]
                         ]
                     ]
-                ],
-                "generationConfig" => [
-                    "temperature" => 0.2
                 ]
             ];
 
             $response = Http::timeout(60)
-                ->acceptJson()
                 ->withHeaders([
                     "Content-Type" => "application/json"
                 ])
@@ -425,171 +368,17 @@ TEXT;
             if (!$response->successful()) {
                 Log::warning('Gemini description failed', [
                     'status' => $response->status(),
-                    'body' => $response->body(),
-                    'category' => $category
+                    'body' => $response->body()
                 ]);
-
                 return "作業が正常に完了しました。";
             }
 
-            $result = trim(data_get($response->json(), 'candidates.0.content.parts.0.text', ''));
-
-            return $result !== '' ? $result : "作業が完了しました。";
-
+            return trim($response['candidates'][0]['content']['parts'][0]['text'] ?? "作業が完了しました。");
         } catch (\Throwable $e) {
             Log::warning('generateInspectionDescription exception', [
-                'message' => $e->getMessage(),
-                'category' => $category
-            ]);
-
-            return "作業が完了しました。";
-        }
-    }
-
-    private function normalizeCategory(string $category): string
-    {
-        $category = trim($category);
-
-        if ($category === '') {
-            return '';
-        }
-
-        $category = preg_replace('/\s+/u', '', $category);
-
-        $replacements = [
-            'の交換' => '交換',
-            'の修理' => '修理',
-            'の清掃' => '清掃',
-            '交換作業' => '交換',
-            '修繕' => '修理',
-            '補修作業' => '補修',
-        ];
-
-        $category = strtr($category, $replacements);
-
-        return $category;
-    }
-
-    private function prepareImageForGemini(string $fullPath, int $maxWidth = 1280, int $jpegQuality = 80): ?array
-    {
-        try {
-            if (!file_exists($fullPath)) {
-                return null;
-            }
-
-            $imageInfo = @getimagesize($fullPath);
-
-            if (!$imageInfo || empty($imageInfo['mime'])) {
-                return null;
-            }
-
-            $mime = $imageInfo['mime'];
-            $source = null;
-
-            switch ($mime) {
-                case 'image/jpeg':
-                case 'image/jpg':
-                    $source = @imagecreatefromjpeg($fullPath);
-                    break;
-
-                case 'image/png':
-                    $source = @imagecreatefrompng($fullPath);
-                    break;
-
-                case 'image/gif':
-                    $source = @imagecreatefromgif($fullPath);
-                    break;
-
-                case 'image/webp':
-                    if (function_exists('imagecreatefromwebp')) {
-                        $source = @imagecreatefromwebp($fullPath);
-                    }
-                    break;
-
-                default:
-                    return null;
-            }
-
-            if (!$source) {
-                return null;
-            }
-
-            if (($mime === 'image/jpeg' || $mime === 'image/jpg') && function_exists('exif_read_data')) {
-                $exif = @exif_read_data($fullPath);
-
-                if (!empty($exif['Orientation'])) {
-                    switch ((int) $exif['Orientation']) {
-                        case 3:
-                            $source = imagerotate($source, 180, 0);
-                            break;
-                        case 6:
-                            $source = imagerotate($source, -90, 0);
-                            break;
-                        case 8:
-                            $source = imagerotate($source, 90, 0);
-                            break;
-                    }
-                }
-            }
-
-            $originalWidth = imagesx($source);
-            $originalHeight = imagesy($source);
-
-            if ($originalWidth <= 0 || $originalHeight <= 0) {
-                imagedestroy($source);
-                return null;
-            }
-
-            $newWidth = $originalWidth;
-            $newHeight = $originalHeight;
-
-            if ($originalWidth > $maxWidth) {
-                $ratio = $maxWidth / $originalWidth;
-                $newWidth = (int) round($originalWidth * $ratio);
-                $newHeight = (int) round($originalHeight * $ratio);
-            }
-
-            $canvas = imagecreatetruecolor($newWidth, $newHeight);
-
-            $white = imagecolorallocate($canvas, 255, 255, 255);
-            imagefill($canvas, 0, 0, $white);
-
-            imagecopyresampled(
-                $canvas,
-                $source,
-                0,
-                0,
-                0,
-                0,
-                $newWidth,
-                $newHeight,
-                $originalWidth,
-                $originalHeight
-            );
-
-            ob_start();
-            imagejpeg($canvas, null, $jpegQuality);
-            $binary = ob_get_clean();
-
-            imagedestroy($source);
-            imagedestroy($canvas);
-
-            if (!$binary) {
-                return null;
-            }
-
-            return [
-                'mime_type' => 'image/jpeg',
-                'base64' => base64_encode($binary),
-            ];
-
-        } catch (\Throwable $e) {
-            Log::warning('prepareImageForGemini exception', [
-                'path' => $fullPath,
                 'message' => $e->getMessage()
             ]);
-
-            return null;
+            return "作業が完了しました。";
         }
     }
 }

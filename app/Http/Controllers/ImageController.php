@@ -46,7 +46,14 @@ class ImageController extends Controller
 
         if ($request->hasFile('images')) {
             foreach ($request->file('images') as $file) {
-                $fileName = time() . '_' . $file->getClientOriginalName();
+
+                // extension එක ගන්නවා
+                $extension = $file->getClientOriginalExtension();
+
+                // unique filename (timestamp + random)
+                $fileName = time() . '_' . uniqid() . '.' . $extension;
+
+                // save
                 $filePath = $file->storeAs('uploads/images', $fileName, 'public');
 
                 $image = Image::create([
